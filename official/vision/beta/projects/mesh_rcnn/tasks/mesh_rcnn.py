@@ -4,6 +4,9 @@ from official.core import base_task
 from official.core import task_factory
 from official.vision.beta.projects.mesh_rcnn.configs import mesh_rcnn as exp_cfg
 from official.vision.beta.projects.mesh_rcnn.modeling import factory
+from official.modeling.optimization.optimizer_factory import OptimizerFactory
+from official.modeling.optimization import ema_optimizer
+from official.modeling import performance
 
 import tensorflow as tf
 
@@ -106,14 +109,35 @@ class MeshRCNNTask(base_task.Task):
         Returns:
         A tf.optimizers.Optimizer object.
         """
-        return
+        opt_factory = optimizer_factory.OptimizerFactory(optimizer_config)
+        # pylint: disable=protected-access
+        ema = opt_factory._use_ema
+        opt_factory._use_ema = False
 
+        opt_type = opt_factory._optimizer_type
+        '''
+        if opt_type == 'sgd_torch':
+            optimizer = opt_factory.build_optimizer(opt_factory.build_learning_rate())
+            optimizer.set_bias_lr(
+                opt_factory.get_bias_lr_schedule(self._task_config.smart_bias_lr))
+            optimizer.search_and_set_variable_groups(self._model.trainable_variables)
+        '''
+        optimizer = opt_factory.build_optimizer(opt_factory.build_learning_rate())
+        opt_factory._use_ema = ema
 
+        if ema:
+            logging.info('EMA is enabled.')
+            optimizer = ema_optimizer.ExponentialMovingAverage(optimizer, **self._ema_config.as_dict())
+            #optimizer = opt_factory.add_ema(optimizer)
 
+        # pylint: enable=protected-access
 
+        if runtime_config and runtime_config.loss_scale:
+            use_float16 = runtime_config.mixed_precision_dtype == 'float16'
+            optimizer = performance.configure_optimizer(
+                optimizer,
+                use_float16=use_float16,
+                loss_scale=runtime_config.loss_scale)
 
-    
-
-
-
-
+        return optimizer
+      
